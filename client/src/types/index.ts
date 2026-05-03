@@ -1,14 +1,8 @@
-export interface User {
-  id: string;
+export interface AppUser {
+  id: string; // Clerk userId
   email: string;
   name: string;
   avatarUrl?: string;
-  provider: "local" | "google";
-}
-
-export interface AuthState {
-  user: User | null;
-  token: string | null;
 }
 
 export interface LiveUser {

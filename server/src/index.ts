@@ -1,40 +1,31 @@
 import express from "express";
 import { createServer } from "http";
 import cors from "cors";
-import cookieParser from "cookie-parser";
-import session from "express-session";
 import { config } from "./config/env";
 import { connectDb } from "./services/db";
 import { connectProducer, disconnectProducer } from "./kafka/producer";
-import { startSocketConsumer, stopSocketConsumer } from "./kafka/socketConsumer";
+import {
+  startSocketConsumer,
+  stopSocketConsumer,
+} from "./kafka/socketConsumer";
 import { startDbConsumer, stopDbConsumer } from "./kafka/dbConsumer";
 import { initSocket, shutdownSocket } from "./socket/server";
-import { authRouter, passport } from "./routes/auth";
+import { authRouter } from "./routes/auth";
 import { locationRouter } from "./routes/location";
 
 async function bootstrap() {
-  // ─── Express app ───────────────────────────────────────────────────────
+  // ─── Express app ────────────────────────────────────────────────────────
   const app = express();
 
   app.use(
     cors({
       origin: config.clientUrl,
       credentials: true,
-    })
+    }),
   );
   app.use(express.json());
-  app.use(cookieParser());
-  app.use(
-    session({
-      secret: config.session.secret,
-      resave: false,
-      saveUninitialized: false,
-      cookie: { secure: !config.isDev },
-    })
-  );
-  app.use(passport.initialize());
 
-  // ─── Routes ────────────────────────────────────────────────────────────
+  // ─── Routes ─────────────────────────────────────────────────────────────
   app.use("/api/auth", authRouter);
   app.use("/api/location", locationRouter);
 
@@ -42,11 +33,11 @@ async function bootstrap() {
     res.json({ ok: true, ts: Date.now() });
   });
 
-  // ─── HTTP + Socket.IO ──────────────────────────────────────────────────
+  // ─── HTTP + Socket.IO ────────────────────────────────────────────────────
   const httpServer = createServer(app);
   initSocket(httpServer);
 
-  // ─── Connect services ──────────────────────────────────────────────────
+  // ─── Connect services ────────────────────────────────────────────────────
   try {
     await connectDb();
   } catch (err) {
@@ -61,17 +52,17 @@ async function bootstrap() {
   } catch (err) {
     console.error("[Bootstrap] Kafka connection failed:", err);
     console.warn(
-      "[Bootstrap] Continuing without Kafka — location events will broadcast directly"
+      "[Bootstrap] Continuing without Kafka — location events will broadcast directly",
     );
   }
 
-  // ─── Start listening ───────────────────────────────────────────────────
+  // ─── Start listening ─────────────────────────────────────────────────────
   httpServer.listen(config.port, () => {
     console.log(`[Server] Running on http://localhost:${config.port}`);
     console.log(`[Server] Environment: ${config.nodeEnv}`);
   });
 
-  // ─── Graceful shutdown ─────────────────────────────────────────────────
+  // ─── Graceful shutdown ───────────────────────────────────────────────────
   async function shutdown(signal: string) {
     console.log(`\n[Server] Received ${signal}, shutting down...`);
     shutdownSocket();

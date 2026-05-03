@@ -1,4 +1,4 @@
-import { getUser, clearToken, setUser } from "../lib/auth";
+import { getUser, signOut } from "../lib/auth";
 import { navigate } from "../lib/router";
 import {
   initMap,
@@ -34,16 +34,17 @@ export function AppPage(): HTMLElement {
   }
 
   let isSharing = false;
-  let isConnected = false;
   let locationInterval: number | null = null;
   let watchId: number | null = null;
   let currentCoords: GeolocationCoordinates | null = null;
 
-  // ─── Layout ──────────────────────────────────────────────────────────────
+  // Unsubscribe functions collected from socket event helpers — called on cleanup
+  const unsubs: Array<() => void> = [];
+
+  // ─── Layout ───────────────────────────────────────────────────────────────
   const page = document.createElement("div");
   page.className = "h-screen w-screen flex overflow-hidden bg-canvas";
 
-  // Sidebar
   const sidebar = new UserSidebar({
     currentUserId: user.id,
     isSharing: false,
@@ -53,7 +54,6 @@ export function AppPage(): HTMLElement {
     onPanToMe: handlePanToMe,
   });
 
-  // Map container
   const mapContainer = document.createElement("div");
   mapContainer.id = "map";
   mapContainer.className = "flex-1 h-full";
@@ -61,64 +61,68 @@ export function AppPage(): HTMLElement {
   page.appendChild(sidebar.getElement());
   page.appendChild(mapContainer);
 
-  // ─── Init map after DOM mount ─────────────────────────────────────────
+  // ─── Init map + socket after DOM mount ────────────────────────────────────
   setTimeout(() => {
     initMap("map");
-    initSocket_();
+    void initSocket_();
   }, 50);
 
-  function initSocket_() {
+  async function initSocket_() {
     try {
-      connectSocket();
+      await connectSocket();
     } catch (err) {
-      toast("Could not connect to server", "error");
+      toast(
+        err instanceof Error ? err.message : "Could not connect to server",
+        "error",
+      );
       return;
     }
 
-    onConnect(() => {
-      isConnected = true;
-      sidebar.setConnected(true);
-      toast("Connected to live tracker", "success");
-    });
+    // Register listeners and collect unsubscribe fns to prevent re-mount buildup
+    unsubs.push(
+      onConnect(() => {
+        sidebar.setConnected(true);
+        toast("Connected to live tracker", "success");
+      }),
 
-    onDisconnect((reason) => {
-      isConnected = false;
-      sidebar.setConnected(false);
-      toast(`Disconnected: ${reason}`, "warn");
-      stopLocationSharing();
-    });
+      onDisconnect((reason) => {
+        sidebar.setConnected(false);
+        toast(`Disconnected: ${reason}`, "warn");
+        stopLocationSharing();
+      }),
 
-    onSocketError((err) => {
-      toast(err.message, "error");
-    });
+      onSocketError((err) => {
+        toast(err.message, "error");
+      }),
 
-    onUsersSnapshot((users: LiveUser[]) => {
-      sidebar.setUsers(users);
-      users.forEach((u) => updateUserMarker(u, user.id));
-    });
+      onUsersSnapshot((users: LiveUser[]) => {
+        sidebar.setUsers(users);
+        users.forEach((u) => updateUserMarker(u, user.id));
+      }),
 
-    onLocationUpdate((update) => {
-      const liveUser: LiveUser = {
-        userId: update.userId,
-        userName: update.userName,
-        avatarUrl: update.avatarUrl,
-        latitude: update.latitude,
-        longitude: update.longitude,
-        accuracy: update.accuracy,
-        lastSeen: update.timestamp,
-      };
-      sidebar.updateUser(liveUser);
-      updateUserMarker(liveUser, user.id);
-    });
+      onLocationUpdate((update) => {
+        const liveUser: LiveUser = {
+          userId: update.userId,
+          userName: update.userName,
+          avatarUrl: update.avatarUrl,
+          latitude: update.latitude,
+          longitude: update.longitude,
+          accuracy: update.accuracy,
+          lastSeen: update.timestamp,
+        };
+        sidebar.updateUser(liveUser);
+        updateUserMarker(liveUser, user.id);
+      }),
 
-    onUserLeft(({ userId }) => {
-      sidebar.removeUser(userId);
-      removeUserMarker(userId);
-      toast(`A user went offline`, "info", 2000);
-    });
+      onUserLeft(({ userId }) => {
+        sidebar.removeUser(userId);
+        removeUserMarker(userId);
+        toast("A user went offline", "info", 2000);
+      }),
+    );
   }
 
-  // ─── Location sharing ─────────────────────────────────────────────────
+  // ─── Location sharing ──────────────────────────────────────────────────────
 
   function handleToggleShare() {
     if (isSharing) {
@@ -140,30 +144,27 @@ export function AppPage(): HTMLElement {
         isSharing = true;
         sidebar.setSharing(true);
 
-        // Send immediately
         sendLocation(
           pos.coords.latitude,
           pos.coords.longitude,
-          pos.coords.accuracy
+          pos.coords.accuracy,
         );
         panToCurrentUser(pos.coords.latitude, pos.coords.longitude);
 
-        // Set up continuous watch
         watchId = navigator.geolocation.watchPosition(
           (p) => {
             currentCoords = p.coords;
           },
           () => {},
-          { enableHighAccuracy: true, timeout: 10000 }
+          { enableHighAccuracy: true, timeout: 10000 },
         );
 
-        // Send on interval
         locationInterval = window.setInterval(() => {
           if (currentCoords) {
             sendLocation(
               currentCoords.latitude,
               currentCoords.longitude,
-              currentCoords.accuracy
+              currentCoords.accuracy,
             );
           }
         }, LOCATION_INTERVAL_MS);
@@ -178,7 +179,7 @@ export function AppPage(): HTMLElement {
         };
         toast(messages[err.code] ?? "Failed to get location", "error");
       },
-      { enableHighAccuracy: true, timeout: 15000 }
+      { enableHighAccuracy: true, timeout: 15000 },
     );
   }
 
@@ -197,7 +198,6 @@ export function AppPage(): HTMLElement {
     }
 
     stopSharing();
-    toast("Location sharing stopped", "info");
   }
 
   function handlePanToMe() {
@@ -208,12 +208,14 @@ export function AppPage(): HTMLElement {
     panToCurrentUser(currentCoords.latitude, currentCoords.longitude);
   }
 
-  function handleLogout() {
+  async function handleLogout() {
     stopLocationSharing();
+    // Remove all socket event listeners before disconnecting
+    unsubs.forEach((fn) => fn());
+    unsubs.length = 0;
     disconnectSocket();
     destroyMap();
-    clearToken();
-    setUser(null);
+    await signOut();
     navigate("/login");
   }
 

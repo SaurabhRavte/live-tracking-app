@@ -1,14 +1,13 @@
 import "./assets/main.css";
 import { initRouter, navigate } from "./lib/router";
-import { initAuth, getUser, getToken } from "./lib/auth";
+import { initAuth, getUser, clerk } from "./lib/auth";
 import { LoginPage } from "./pages/LoginPage";
 import { AppPage } from "./pages/AppPage";
-import { AuthCallbackPage } from "./pages/AuthCallbackPage";
 
 async function main() {
   const app = document.getElementById("app")!;
 
-  // Restore auth state from localStorage
+  // Load Clerk and restore auth state
   await initAuth();
 
   initRouter({
@@ -17,18 +16,18 @@ async function main() {
       {
         path: "/",
         render: () => {
-          if (getUser() && getToken()) {
+          if (clerk.session) {
             navigate("/app");
-            return document.createElement("div");
+          } else {
+            navigate("/login");
           }
-          navigate("/login");
           return document.createElement("div");
         },
       },
       {
         path: "/login",
         render: () => {
-          if (getUser() && getToken()) {
+          if (clerk.session) {
             navigate("/app");
             return document.createElement("div");
           }
@@ -38,16 +37,12 @@ async function main() {
       {
         path: "/app",
         render: () => {
-          if (!getUser() || !getToken()) {
+          if (!clerk.session) {
             navigate("/login");
             return document.createElement("div");
           }
           return AppPage();
         },
-      },
-      {
-        path: "/auth/callback",
-        render: () => AuthCallbackPage(),
       },
       {
         path: "*",
@@ -57,6 +52,13 @@ async function main() {
         },
       },
     ],
+  });
+
+  // Redirect to /login automatically when user signs out via Clerk
+  clerk.addListener(({ session }) => {
+    if (!session && window.location.pathname === "/app") {
+      navigate("/login");
+    }
   });
 }
 

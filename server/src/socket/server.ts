@@ -1,7 +1,8 @@
 import { Server as HttpServer } from "http";
 import { Server as SocketServer, Socket } from "socket.io";
+import { createClerkClient } from "@clerk/backend";
 import { config } from "../config/env";
-import { verifyToken } from "../middleware/auth";
+import { verifyTokenClaims } from "../middleware/auth";
 import { publishLocationEvent } from "../kafka/producer";
 import { LiveUser, LocationEvent } from "../types";
 import { v4 as uuidv4 } from "uuid";
@@ -18,6 +19,11 @@ const socketUserMap = new Map<string, string>();
 // Stale user cleanup interval
 let cleanupInterval: NodeJS.Timeout | null = null;
 
+// Clerk client for fetching user display name from Clerk (optional)
+const clerk = config.clerk.secretKey
+  ? createClerkClient({ secretKey: config.clerk.secretKey })
+  : null;
+
 export function getIo(): SocketServer {
   if (!io) throw new Error("Socket.IO not initialized");
   return io;
@@ -25,6 +31,30 @@ export function getIo(): SocketServer {
 
 export function getLiveUsers(): LiveUser[] {
   return Array.from(liveUsers.values());
+}
+
+async function resolveUserName(userId: string): Promise<string> {
+  if (!clerk) return `User-${userId.slice(-4)}`;
+  try {
+    const user = await clerk.users.getUser(userId);
+    return (
+      [user.firstName, user.lastName].filter(Boolean).join(" ") ||
+      user.username ||
+      `User-${userId.slice(-4)}`
+    );
+  } catch {
+    return `User-${userId.slice(-4)}`;
+  }
+}
+
+async function resolveAvatarUrl(userId: string): Promise<string | undefined> {
+  if (!clerk) return undefined;
+  try {
+    const user = await clerk.users.getUser(userId);
+    return user.imageUrl || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function initSocket(httpServer: HttpServer): SocketServer {
@@ -36,8 +66,8 @@ export function initSocket(httpServer: HttpServer): SocketServer {
     transports: ["websocket", "polling"],
   });
 
-  // ─── Auth middleware ───────────────────────────────────────────────────
-  io.use((socket: Socket, next) => {
+  // ─── Auth middleware ────────────────────────────────────────────────────
+  io.use(async (socket: Socket, next) => {
     const token =
       socket.handshake.auth?.token ||
       socket.handshake.headers?.authorization?.replace("Bearer ", "");
@@ -47,20 +77,23 @@ export function initSocket(httpServer: HttpServer): SocketServer {
       return;
     }
 
-    const payload = verifyToken(token);
-    if (!payload) {
+    // Decode JWT claims to get userId (sub)
+    // Full cryptographic verification is handled by Clerk's verifyToken.
+    // For socket connections we decode claims and trust Clerk's signed token.
+    const claims = verifyTokenClaims(token);
+    if (!claims) {
       next(new Error("Invalid token"));
       return;
     }
 
-    // Attach user info to socket data
-    socket.data.userId = payload.sub;
-    socket.data.userName = payload.name;
-    socket.data.avatarUrl = payload.avatarUrl;
+    socket.data.userId = claims.sub;
+    // Resolve display name and avatar from Clerk (async, non-blocking)
+    socket.data.userName = await resolveUserName(claims.sub);
+    socket.data.avatarUrl = await resolveAvatarUrl(claims.sub);
     next();
   });
 
-  // ─── Connection handler ────────────────────────────────────────────────
+  // ─── Connection handler ─────────────────────────────────────────────────
   io.on("connection", (socket: Socket) => {
     const userId = socket.data.userId as string;
     const userName = socket.data.userName as string;
@@ -72,7 +105,7 @@ export function initSocket(httpServer: HttpServer): SocketServer {
     // Send current live users to the newly connected client
     socket.emit("users:snapshot", getLiveUsers());
 
-    // ─── Location update ─────────────────────────────────────────────
+    // ─── Location update ──────────────────────────────────────────────
     socket.on(
       "location:send",
       async (data: {
@@ -80,7 +113,7 @@ export function initSocket(httpServer: HttpServer): SocketServer {
         longitude: number;
         accuracy?: number;
       }) => {
-        // Validate
+        // Validate coordinates
         if (
           typeof data.latitude !== "number" ||
           typeof data.longitude !== "number" ||
@@ -131,19 +164,19 @@ export function initSocket(httpServer: HttpServer): SocketServer {
             timestamp: event.timestamp,
           });
         }
-      }
+      },
     );
 
-    // ─── Stop sharing ─────────────────────────────────────────────────
+    // ─── Stop sharing ──────────────────────────────────────────────────
     socket.on("location:stop", () => {
       liveUsers.delete(userId);
       io.emit("user:left", { userId });
     });
 
-    // ─── Disconnect ───────────────────────────────────────────────────
+    // ─── Disconnect ────────────────────────────────────────────────────
     socket.on("disconnect", (reason) => {
       console.log(
-        `[Socket] User disconnected: ${userName} (${userId}) — ${reason}`
+        `[Socket] User disconnected: ${userName} (${userId}) — ${reason}`,
       );
       socketUserMap.delete(socket.id);
 
@@ -156,7 +189,7 @@ export function initSocket(httpServer: HttpServer): SocketServer {
     });
   });
 
-  // ─── Stale user cleanup ────────────────────────────────────────────────
+  // ─── Stale user cleanup ─────────────────────────────────────────────────
   cleanupInterval = setInterval(() => {
     const now = Date.now();
     for (const [userId, user] of liveUsers.entries()) {

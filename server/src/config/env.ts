@@ -11,15 +11,17 @@ function optional(key: string, fallback: string): string {
   return process.env[key] ?? fallback;
 }
 
+const isDev = optional("NODE_ENV", "development") === "development";
+
 export const config = {
   port: parseInt(optional("PORT", "4000")),
   nodeEnv: optional("NODE_ENV", "development"),
-  isDev: optional("NODE_ENV", "development") === "development",
+  isDev,
 
   db: {
     url: optional(
       "DATABASE_URL",
-      "postgresql://tracker:tracker_secret@localhost:5432/tracker_db"
+      "postgresql://tracker:tracker_secret@localhost:5432/tracker_db",
     ),
   },
 
@@ -30,22 +32,11 @@ export const config = {
     socketConsumerGroup: "location-socket-broadcaster",
   },
 
-  jwt: {
-    secret: optional("JWT_SECRET", "dev_jwt_secret_change_in_prod"),
-    expiresIn: "7d",
-  },
-
-  session: {
-    secret: optional("SESSION_SECRET", "dev_session_secret"),
-  },
-
-  google: {
-    clientId: optional("GOOGLE_CLIENT_ID", ""),
-    clientSecret: optional("GOOGLE_CLIENT_SECRET", ""),
-    callbackUrl: optional(
-      "GOOGLE_CALLBACK_URL",
-      "http://localhost:4000/api/auth/google/callback"
-    ),
+  clerk: {
+    // In production CLERK_SECRET_KEY is required; in dev it can be empty for local testing
+    secretKey: isDev
+      ? optional("CLERK_SECRET_KEY", "")
+      : required("CLERK_SECRET_KEY"),
   },
 
   clientUrl: optional("CLIENT_URL", "http://localhost:5173"),

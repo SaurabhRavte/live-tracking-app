@@ -1,12 +1,9 @@
 export interface User {
-  id: string;
+  id: string; // Clerk userId (user_xxx)
   email: string;
   name: string;
   avatarUrl?: string;
-  provider: "local" | "google";
-  providerId?: string;
-  createdAt: Date;
-  updatedAt: Date;
+  provider: "clerk";
 }
 
 export interface LocationEvent {
@@ -30,18 +27,11 @@ export interface LiveUser {
   lastSeen: number; // Unix ms
 }
 
-export interface JwtPayload {
-  sub: string; // userId
-  email: string;
-  name: string;
-  avatarUrl?: string;
-}
-
 // Extend Express Request
 declare global {
   namespace Express {
     interface Request {
-      user?: User;
+      clerkUserId?: string;
     }
   }
 }

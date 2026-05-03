@@ -1,33 +1,34 @@
-import { User } from "../types";
+import Clerk from "@clerk/clerk-js";
 
-const TOKEN_KEY = "tracker_token";
+const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string;
 
-// ─── Token helpers ─────────────────────────────────────────────────────────
-
-export function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY);
+if (!PUBLISHABLE_KEY) {
+  throw new Error("Missing VITE_CLERK_PUBLISHABLE_KEY — add it to client/.env");
 }
 
-export function setToken(token: string): void {
-  localStorage.setItem(TOKEN_KEY, token);
+// Single Clerk instance shared across the app
+export const clerk = new Clerk(PUBLISHABLE_KEY);
+
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+export interface AppUser {
+  id: string;
+  email: string;
+  name: string;
+  avatarUrl?: string;
 }
 
-export function clearToken(): void {
-  localStorage.removeItem(TOKEN_KEY);
-}
+// ─── Simple event emitter for auth state changes ──────────────────────────────
 
-// ─── Simple event emitter for auth state changes ───────────────────────────
-
-type Listener = (user: User | null) => void;
+type Listener = (user: AppUser | null) => void;
 const listeners: Set<Listener> = new Set();
+let currentUser: AppUser | null = null;
 
-let currentUser: User | null = null;
-
-export function getUser(): User | null {
+export function getUser(): AppUser | null {
   return currentUser;
 }
 
-export function setUser(user: User | null): void {
+export function setUser(user: AppUser | null): void {
   currentUser = user;
   listeners.forEach((fn) => fn(user));
 }
@@ -37,64 +38,57 @@ export function onAuthChange(fn: Listener): () => void {
   return () => listeners.delete(fn);
 }
 
-// ─── API helpers ───────────────────────────────────────────────────────────
-
-const API_URL = (import.meta.env.VITE_API_URL as string) || "";
-
-export async function apiRegister(
-  email: string,
-  password: string,
-  name: string
-): Promise<{ token: string; user: User }> {
-  const res = await fetch(`${API_URL}/api/auth/register`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password, name }),
-  });
-  if (!res.ok) {
-    const err = (await res.json()) as { error: string };
-    throw new Error(err.error);
-  }
-  return res.json() as Promise<{ token: string; user: User }>;
-}
-
-export async function apiLogin(
-  email: string,
-  password: string
-): Promise<{ token: string; user: User }> {
-  const res = await fetch(`${API_URL}/api/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
-  });
-  if (!res.ok) {
-    const err = (await res.json()) as { error: string };
-    throw new Error(err.error);
-  }
-  return res.json() as Promise<{ token: string; user: User }>;
-}
-
-export async function apiGetMe(token: string): Promise<User> {
-  const res = await fetch(`${API_URL}/api/auth/me`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok) throw new Error("Session expired");
-  const data = (await res.json()) as { user: User };
-  return data.user;
-}
-
-export function getGoogleLoginUrl(): string {
-  return `${API_URL}/api/auth/google`;
-}
+// ─── Init ────────────────────────────────────────────────────────────────────
 
 export async function initAuth(): Promise<void> {
-  const token = getToken();
-  if (!token) return;
-  try {
-    const user = await apiGetMe(token);
-    setUser(user);
-  } catch {
-    clearToken();
-    setUser(null);
+  await clerk.load();
+
+  if (clerk.user) {
+    setUser(mapClerkUser());
   }
+
+  // Keep local state in sync when Clerk session changes
+  clerk.addListener(({ user }) => {
+    if (user) {
+      setUser(mapClerkUser());
+    } else {
+      setUser(null);
+    }
+  });
+}
+
+function mapClerkUser(): AppUser | null {
+  const u = clerk.user;
+  if (!u) return null;
+  return {
+    id: u.id,
+    email: u.primaryEmailAddress?.emailAddress ?? "",
+    name:
+      [u.firstName, u.lastName].filter(Boolean).join(" ") ||
+      u.username ||
+      "User",
+    avatarUrl: u.imageUrl || undefined,
+  };
+}
+
+// ─── Token helpers ────────────────────────────────────────────────────────────
+
+/**
+ * Returns the current Clerk session JWT.
+ * This is async because Clerk refreshes tokens automatically.
+ */
+export async function getToken(): Promise<string | null> {
+  if (!clerk.session) return null;
+  try {
+    return await clerk.session.getToken();
+  } catch {
+    return null;
+  }
+}
+
+// ─── Sign out ─────────────────────────────────────────────────────────────────
+
+export async function signOut(): Promise<void> {
+  await clerk.signOut();
+  setUser(null);
 }
