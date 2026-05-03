@@ -13,13 +13,13 @@ A production-grade real-time location sharing system built with **Socket.IO**, *
 ```
 Browser (Vite + Leaflet)
      │
-     │  Socket.IO (JWT auth)
+     │  Socket.IO (Clerk auth)
      ▼
 Express + Socket.IO Server
      │
      │  publishLocationEvent()
      ▼
-Kafka Topic: location-events
+Kafka Topic: location-events  (optional — falls back to direct io.emit if unavailable)
      │
      ├─── Consumer Group 1: socket-broadcaster
      │         └── io.emit("location:update") → all browsers
@@ -38,7 +38,7 @@ Kafka Topic: location-events
 | Hard to add more processors          | Add consumer groups independently         |
 | No deduplication                     | event_id ensures idempotency              |
 
-Consumer groups mean the socket broadcaster and DB writer are completely independent — one can crash without affecting the other.
+> **Note:** Kafka is optional. If `KAFKA_BROKERS` is not set, the app automatically falls back to direct `io.emit()` and still works perfectly.
 
 ---
 
@@ -48,18 +48,17 @@ Consumer groups mean the socket broadcaster and DB writer are completely indepen
 | ---------------- | --------------------------------------- |
 | Frontend         | Vite, TypeScript, Tailwind CSS, Leaflet |
 | Backend          | Express, Socket.IO, TypeScript          |
-| Auth             | JWT, Passport.js, Google OAuth 2.0      |
-| Message Queue    | Apache Kafka (via KafkaJS)              |
+| Auth             | Clerk                                   |
+| Message Queue    | Apache Kafka (via KafkaJS) — optional   |
 | Database         | PostgreSQL 16                           |
 | Containerization | Docker, Docker Compose                  |
-| Proxy            | Nginx                                   |
 
 ---
 
 ## Project Structure
 
 ```
-live-tracker/
+live-tracking-app/
 ├── docker-compose.yml          # Full production stack
 ├── docker-compose.dev.yml      # Dev infra only (Kafka + Postgres)
 ├── package.json                # Root scripts
@@ -71,14 +70,12 @@ live-tracker/
 │   │   │   ├── UserSidebar.ts  # Live users panel
 │   │   │   └── Toast.ts        # Notifications
 │   │   ├── lib/
-│   │   │   ├── auth.ts         # JWT + API helpers
 │   │   │   ├── map.ts          # Leaflet manager
 │   │   │   ├── router.ts       # Hash SPA router
 │   │   │   └── socket.ts       # Socket.IO client
 │   │   ├── pages/
-│   │   │   ├── LoginPage.ts    # Register + Login + Google
-│   │   │   ├── AppPage.ts      # Main map view
-│   │   │   └── AuthCallbackPage.ts
+│   │   │   ├── LoginPage.ts
+│   │   │   └── AppPage.ts      # Main map view
 │   │   ├── types/index.ts
 │   │   └── main.ts
 │   ├── index.html
@@ -88,19 +85,18 @@ live-tracker/
 │
 └── server/                     # Express + Socket.IO backend
     ├── src/
-    │   ├── config/env.ts        # Environment config
+    │   ├── config/env.ts
     │   ├── kafka/
-    │   │   ├── producer.ts      # Kafka producer
-    │   │   ├── socketConsumer.ts # Consumer Group 1
-    │   │   └── dbConsumer.ts    # Consumer Group 2
-    │   ├── middleware/auth.ts   # JWT middleware
+    │   │   ├── producer.ts
+    │   │   ├── socketConsumer.ts
+    │   │   └── dbConsumer.ts
+    │   ├── middleware/auth.ts
     │   ├── routes/
-    │   │   ├── auth.ts          # Register, login, Google OAuth
-    │   │   └── location.ts      # Location history API
-    │   ├── services/db.ts       # PostgreSQL queries
-    │   ├── socket/server.ts     # Socket.IO server + auth
+    │   │   └── location.ts
+    │   ├── services/db.ts
+    │   ├── socket/server.ts
     │   ├── types/index.ts
-    │   └── index.ts             # Entry point
+    │   └── index.ts
     ├── sql/init.sql             # DB schema
     └── Dockerfile
 ```
@@ -118,20 +114,15 @@ live-tracker/
 ### Step 1 — Clone and install
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/live-tracker
-cd live-tracker
-
-# Install all dependencies
+git clone https://github.com/SaurabhRavte/live-tracking-app
+cd live-tracking-app
 pnpm install:all
 ```
 
 ### Step 2 — Environment variables
 
 ```bash
-# Server
 cp server/.env.example server/.env
-
-# Client
 cp client/.env.example client/.env
 ```
 
@@ -144,7 +135,7 @@ NODE_ENV=development
 # Database
 DATABASE_URL=postgresql://tracker:tracker_secret@localhost:5432/tracker_db
 
-# Kafka
+# Kafka (optional — remove this line to use Socket.IO fallback)
 KAFKA_BROKERS=localhost:29092
 
 # Clerk — get from https://dashboard.clerk.com → API Keys
@@ -159,8 +150,7 @@ Edit `client/.env`:
 ```env
 VITE_API_URL=http://localhost:4000
 VITE_SOCKET_URL=http://localhost:4000
-VITE_CLERK_PUBLISHABLE_KEY=your_google_client_id.apps.googleusercontent.com
-
+VITE_CLERK_PUBLISHABLE_KEY=pk_test_your_clerk_publishable_key_here
 ```
 
 ### Step 3 — Start infrastructure (Kafka + Postgres)
@@ -169,15 +159,13 @@ VITE_CLERK_PUBLISHABLE_KEY=your_google_client_id.apps.googleusercontent.com
 pnpm infra:up
 ```
 
-Wait ~15 seconds for Kafka to be ready. Check:
+Wait ~15 seconds for Kafka to be ready, then check logs:
 
 ```bash
 pnpm infra:logs
 ```
 
 ### Step 4 — Run backend and frontend
-
-In two terminals:
 
 ```bash
 # Terminal 1 — Backend
@@ -191,80 +179,95 @@ Open http://localhost:5173
 
 ---
 
-## Google OAuth Setup
+## Clerk Auth Setup
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a new project (or use existing)
-3. Enable **Google+ API** or **Google Identity**
-4. Go to **Credentials → Create OAuth 2.0 Client ID**
-5. Application type: **Web application**
-6. Authorized redirect URIs:
-   - Development: `http://localhost:4000/api/auth/google/callback`
-   - Production: `https://yourdomain.com/api/auth/google/callback`
-7. Copy Client ID and Secret to your `.env` files
+This project uses [Clerk](https://clerk.com) for authentication.
+
+1. Go to [dashboard.clerk.com](https://dashboard.clerk.com) and create a free account
+2. Click **"Create Application"** → give it a name → choose login methods (Email recommended)
+3. Go to **API Keys** from the left sidebar
+4. Copy:
+   - **Secret Key** (starts with `sk_test_...`) → goes in `server/.env` as `CLERK_SECRET_KEY`
+   - **Publishable Key** (starts with `pk_test_...`) → goes in `client/.env` as `VITE_CLERK_PUBLISHABLE_KEY`
 
 ---
 
-## Docker Deployment (Production)
+## 🚀 Production Deployment (Railway + Vercel — Free)
 
-### Option A — All-in-one on a single server
+This is the recommended free hosting setup:
 
-```bash
-# Create .env at root (or export directly)
-cat > .env << EOF
-PORT=4000
-NODE_ENV=development
+| Part                | Platform                                 | Cost      |
+| ------------------- | ---------------------------------------- | --------- |
+| Backend (Node.js)   | Railway                                  | Free tier |
+| PostgreSQL Database | Railway                                  | Free tier |
+| Frontend (Vite)     | Vercel                                   | Free      |
+| Kafka               | Not needed — app uses Socket.IO fallback | —         |
 
-# Database
-DATABASE_URL=postgresql://tracker:tracker_secret@localhost:5432/tracker_db
+### Step 1 — Deploy Backend on Railway
 
-# Kafka
-KAFKA_BROKERS=localhost:29092
+1. Go to [railway.app](https://railway.app) → sign up with GitHub
+2. Click **"New Project" → "Deploy from GitHub repo"** → select `live-tracking-app`
+3. In the service **Settings**, set **Root Directory** to `/server`
+4. Railway will auto-detect Node.js and build it
 
-# Clerk — get from https://dashboard.clerk.com → API Keys
-CLERK_SECRET_KEY=sk_test_your_clerk_secret_key_here
+### Step 2 — Add PostgreSQL on Railway
 
-# Client URL (for CORS)
-CLIENT_URL=http://localhost:5173
+1. In your Railway project, click **"+ Add" → "Database" → "PostgreSQL"**
+2. After it's created, click the PostgreSQL service → **Variables** tab
+3. Copy the `DATABASE_URL` value
 
-# Build and start everything
-pnpm docker:up
+### Step 3 — Initialize the Database
 
-# View logs
-pnpm docker:logs
-```
+1. Click the PostgreSQL service → **"Query"** tab
+2. Open `server/sql/init.sql` from this repo
+3. Paste the contents and click **Run** — this creates all required tables
 
-Services:
+### Step 4 — Set Backend Environment Variables
 
-- Frontend: `http://YOUR_SERVER_IP` (port 80)
-- Backend: `http://YOUR_SERVER_IP:4000`
-- Kafka: internal only
-
-### Option B — Deploy to Railway / Render / Fly.io
-
-1. **Database**: Use Railway PostgreSQL or Supabase
-2. **Kafka**: Use [Confluent Cloud](https://confluent.io) free tier
-   - Get bootstrap server URL (format: `pkc-xxx.region.aws.confluent.cloud:9092`)
-   - Set `KAFKA_BROKERS` to this URL
-3. **Backend**: Deploy `server/` as a Node.js service
-4. **Frontend**: Deploy `client/` as a static site (Vercel/Netlify)
-   - Build command: `pnpm build`
-   - Output dir: `dist`
-
-### Environment variables for production backend
+Click your backend service → **Variables** tab → add these:
 
 ```env
 NODE_ENV=production
 PORT=4000
-DATABASE_URL=postgresql://user:pass@host:5432/db
-KAFKA_BROKERS=your-confluent-bootstrap-server:9092
-JWT_SECRET=<strong random string>
-SESSION_SECRET=<strong random string>
-GOOGLE_CLIENT_ID=...
-GOOGLE_CLIENT_SECRET=...
-GOOGLE_CALLBACK_URL=https://your-api.com/api/auth/google/callback
-CLIENT_URL=https://your-frontend.com
+DATABASE_URL=<paste from Railway PostgreSQL>
+CLERK_SECRET_KEY=<your Clerk secret key>
+CLIENT_URL=<your Vercel frontend URL — fill after Step 6>
 ```
+
+> ⚠️ Do **not** add `KAFKA_BROKERS` — the app will automatically use Socket.IO fallback mode.
+
+### Step 5 — Deploy Frontend on Vercel
+
+1. Go to [vercel.com](https://vercel.com) → sign up with GitHub
+2. Click **"New Project"** → import `live-tracking-app`
+3. Set **Root Directory** to `client`
+4. Set **Build Command** to `pnpm build`
+5. Set **Output Directory** to `dist`
+6. Add these **Environment Variables**:
+
+```env
+VITE_API_URL=https://<your-railway-backend-url>
+VITE_SOCKET_URL=https://<your-railway-backend-url>
+VITE_CLERK_PUBLISHABLE_KEY=<your Clerk publishable key>
+```
+
+7. Click **Deploy**
+
+### Step 6 — Update CLIENT_URL in Railway
+
+Once Vercel gives you a frontend URL:
+
+1. Go back to Railway → backend service → **Variables**
+2. Update `CLIENT_URL` to your Vercel URL (e.g. `https://live-tracking-app.vercel.app`)
+3. Railway will auto-redeploy
+
+### Step 7 — Update Clerk Allowed Origins
+
+1. Go to [dashboard.clerk.com](https://dashboard.clerk.com) → your app
+2. Go to **"Domains"** → add your Vercel frontend URL
+3. This allows Clerk to work on your production domain ✅
+
+Your app is now live! 🎉
 
 ---
 
@@ -273,13 +276,12 @@ CLIENT_URL=https://your-frontend.com
 ```
 Client                          Server
   │                                │
-  │── connect (auth: {token}) ────►│  verify JWT, attach user to socket
+  │── connect (Clerk token) ──────►│  verify token, attach user to socket
   │                                │
   │◄─ users:snapshot ──────────────│  all currently live users
   │                                │
-  │── location:send {lat,lng} ────►│  validate → publish to Kafka
+  │── location:send {lat,lng} ────►│  validate → publish to Kafka (or direct emit)
   │                                │
-  │                    Kafka Consumer (socket-broadcaster)
   │◄─ location:update ─────────────│  broadcast to all connected clients
   │                                │
   │── location:stop ───────────────►  remove from live map
@@ -289,7 +291,7 @@ Client                          Server
 
 ---
 
-## Kafka Event Flow
+## Kafka Event Flow (when Kafka is configured)
 
 ```
 Socket.IO Server
@@ -304,8 +306,6 @@ Socket.IO Server
                   to all Socket.IO clients      ON CONFLICT (event_id) DO NOTHING
 ```
 
-**Consumer groups** mean Kafka delivers each message to **both** consumers independently. Adding a third consumer (e.g., analytics, geofencing) requires zero changes to existing code.
-
 ---
 
 ## Assumptions and Limitations
@@ -314,23 +314,21 @@ Socket.IO Server
 - **Location interval**: Frontend sends every 5 seconds while sharing
 - **Single Kafka broker**: Production should use 3 brokers for HA
 - **In-memory live user store**: For multi-server deployments, use Redis
-- **Google OAuth**: Requires valid credentials — email/password auth works without them
 - **HTTPS**: Required for `getCurrentPosition` on production domains (not localhost)
-- **Session store**: Uses memory store in dev; use `connect-pg-simple` in production
 - **Deduplication**: Handled via `event_id` (UUID) with `ON CONFLICT DO NOTHING`
 
 ---
 
 ## Key Design Decisions
 
-### User identity via JWT, not socket ID
+### Clerk for Auth
 
-Socket IDs change on reconnect. The system always identifies users by their JWT `sub` (userId), so reconnecting users resume seamlessly and the correct marker is updated on the map.
+Clerk handles all authentication (email/password, social login, session management) out of the box — no need to manage JWTs or OAuth flows manually.
+
+### Kafka is Optional
+
+If `KAFKA_BROKERS` is not set, the server falls back to direct `io.emit()`. This means you can deploy without any Kafka setup and the real-time tracking still works. Kafka only becomes necessary at scale.
 
 ### Two consumer groups, one topic
 
 `socket-broadcaster` and `location-db-writer` both read from `location-events` with different group IDs. Kafka delivers each event to both independently — they can scale, fail, and replay independently.
-
-### Kafka fallback
-
-If Kafka is unavailable (e.g., first startup), the socket server falls back to direct `io.emit()` so the app still works. A warning is logged.
