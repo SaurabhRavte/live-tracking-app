@@ -7,8 +7,6 @@ services:
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
-    ports:
-      - "2181:2181"
     networks:
       - tracker-net
 
@@ -17,9 +15,6 @@ services:
     container_name: tracker-kafka
     depends_on:
       - zookeeper
-    ports:
-      - "9092:9092"
-      - "29092:29092"
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
@@ -31,7 +26,13 @@ services:
     networks:
       - tracker-net
     healthcheck:
-      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      test:
+        [
+          "CMD",
+          "kafka-broker-api-versions",
+          "--bootstrap-server",
+          "localhost:9092",
+        ]
       interval: 10s
       timeout: 10s
       retries: 10
@@ -43,8 +44,6 @@ services:
       POSTGRES_USER: tracker
       POSTGRES_PASSWORD: tracker_secret
       POSTGRES_DB: tracker_db
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./server/sql/init.sql:/docker-entrypoint-initdb.d/init.sql
@@ -73,11 +72,8 @@ services:
       PORT: 4000
       DATABASE_URL: postgresql://tracker:tracker_secret@postgres:5432/tracker_db
       KAFKA_BROKERS: kafka:9092
-      JWT_SECRET: ${JWT_SECRET:-super_secret_jwt_key_change_in_prod}
-      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
-      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
-      CLIENT_URL: ${CLIENT_URL:-http://localhost:5173}
-      SESSION_SECRET: ${SESSION_SECRET:-session_secret_change_in_prod}
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY}
+      CLIENT_URL: ${CLIENT_URL:-http://localhost}
     networks:
       - tracker-net
     restart: unless-stopped
@@ -89,7 +85,7 @@ services:
       args:
         VITE_API_URL: ${CLIENT_API_URL:-http://localhost:4000}
         VITE_SOCKET_URL: ${CLIENT_SOCKET_URL:-http://localhost:4000}
-        VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+        VITE_CLERK_PUBLISHABLE_KEY: ${VITE_CLERK_PUBLISHABLE_KEY}
     container_name: tracker-client
     ports:
       - "80:80"

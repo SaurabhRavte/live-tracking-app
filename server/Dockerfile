@@ -8,19 +8,22 @@ COPY package.json pnpm-lock.yaml* ./
 RUN pnpm install --frozen-lockfile
 
 COPY . .
+
+ARG VITE_API_URL=http://localhost:4000
+ARG VITE_SOCKET_URL=http://localhost:4000
+ARG VITE_CLERK_PUBLISHABLE_KEY
+
+ENV VITE_API_URL=$VITE_API_URL
+ENV VITE_SOCKET_URL=$VITE_SOCKET_URL
+ENV VITE_CLERK_PUBLISHABLE_KEY=$VITE_CLERK_PUBLISHABLE_KEY
+
 RUN pnpm build
 
-FROM node:20-alpine AS runner
+FROM nginx:alpine AS runner
 
-WORKDIR /app
+COPY --from=builder /app/dist /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-RUN npm install -g pnpm
+EXPOSE 80
 
-COPY package.json pnpm-lock.yaml* ./
-RUN pnpm install --prod --frozen-lockfile
-
-COPY --from=builder /app/dist ./dist
-
-EXPOSE 4000
-
-CMD ["node", "dist/index.js"]
+CMD ["nginx", "-g", "daemon off;"]
