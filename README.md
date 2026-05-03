@@ -30,13 +30,13 @@ Kafka Topic: location-events
 
 ### Why Kafka?
 
-| Without Kafka | With Kafka |
-|---|---|
-| Every socket event → direct DB write | Socket handler just enqueues (<1ms) |
-| DB becomes bottleneck at scale | DB consumer processes at sustainable rate |
-| Socket failure = data loss | Kafka retains events for replay |
-| Hard to add more processors | Add consumer groups independently |
-| No deduplication | event_id ensures idempotency |
+| Without Kafka                        | With Kafka                                |
+| ------------------------------------ | ----------------------------------------- |
+| Every socket event → direct DB write | Socket handler just enqueues (<1ms)       |
+| DB becomes bottleneck at scale       | DB consumer processes at sustainable rate |
+| Socket failure = data loss           | Kafka retains events for replay           |
+| Hard to add more processors          | Add consumer groups independently         |
+| No deduplication                     | event_id ensures idempotency              |
 
 Consumer groups mean the socket broadcaster and DB writer are completely independent — one can crash without affecting the other.
 
@@ -44,15 +44,15 @@ Consumer groups mean the socket broadcaster and DB writer are completely indepen
 
 ## Tech Stack
 
-| Layer | Technology |
-|---|---|
-| Frontend | Vite, TypeScript, Tailwind CSS, Leaflet |
-| Backend | Express, Socket.IO, TypeScript |
-| Auth | JWT, Passport.js, Google OAuth 2.0 |
-| Message Queue | Apache Kafka (via KafkaJS) |
-| Database | PostgreSQL 16 |
-| Containerization | Docker, Docker Compose |
-| Proxy | Nginx |
+| Layer            | Technology                              |
+| ---------------- | --------------------------------------- |
+| Frontend         | Vite, TypeScript, Tailwind CSS, Leaflet |
+| Backend          | Express, Socket.IO, TypeScript          |
+| Auth             | JWT, Passport.js, Google OAuth 2.0      |
+| Message Queue    | Apache Kafka (via KafkaJS)              |
+| Database         | PostgreSQL 16                           |
+| Containerization | Docker, Docker Compose                  |
+| Proxy            | Nginx                                   |
 
 ---
 
@@ -136,22 +136,31 @@ cp client/.env.example client/.env
 ```
 
 Edit `server/.env`:
+
 ```env
 PORT=4000
+NODE_ENV=development
+
+# Database
 DATABASE_URL=postgresql://tracker:tracker_secret@localhost:5432/tracker_db
+
+# Kafka
 KAFKA_BROKERS=localhost:29092
-JWT_SECRET=your_strong_secret_here
-SESSION_SECRET=another_strong_secret
-GOOGLE_CLIENT_ID=your_google_client_id
-GOOGLE_CLIENT_SECRET=your_google_client_secret
+
+# Clerk — get from https://dashboard.clerk.com → API Keys
+CLERK_SECRET_KEY=sk_test_your_clerk_secret_key_here
+
+# Client URL (for CORS)
 CLIENT_URL=http://localhost:5173
 ```
 
 Edit `client/.env`:
+
 ```env
 VITE_API_URL=http://localhost:4000
 VITE_SOCKET_URL=http://localhost:4000
-VITE_GOOGLE_CLIENT_ID=your_google_client_id
+VITE_CLERK_PUBLISHABLE_KEY=your_google_client_id.apps.googleusercontent.com
+
 ```
 
 ### Step 3 — Start infrastructure (Kafka + Postgres)
@@ -161,6 +170,7 @@ pnpm infra:up
 ```
 
 Wait ~15 seconds for Kafka to be ready. Check:
+
 ```bash
 pnpm infra:logs
 ```
@@ -202,14 +212,20 @@ Open http://localhost:5173
 ```bash
 # Create .env at root (or export directly)
 cat > .env << EOF
-JWT_SECRET=change_this_strong_secret
-SESSION_SECRET=change_this_other_secret
-GOOGLE_CLIENT_ID=your_google_client_id
-GOOGLE_CLIENT_SECRET=your_google_client_secret
-CLIENT_URL=http://YOUR_SERVER_IP
-CLIENT_API_URL=http://YOUR_SERVER_IP/api
-CLIENT_SOCKET_URL=http://YOUR_SERVER_IP
-EOF
+PORT=4000
+NODE_ENV=development
+
+# Database
+DATABASE_URL=postgresql://tracker:tracker_secret@localhost:5432/tracker_db
+
+# Kafka
+KAFKA_BROKERS=localhost:29092
+
+# Clerk — get from https://dashboard.clerk.com → API Keys
+CLERK_SECRET_KEY=sk_test_your_clerk_secret_key_here
+
+# Client URL (for CORS)
+CLIENT_URL=http://localhost:5173
 
 # Build and start everything
 pnpm docker:up
@@ -219,6 +235,7 @@ pnpm docker:logs
 ```
 
 Services:
+
 - Frontend: `http://YOUR_SERVER_IP` (port 80)
 - Backend: `http://YOUR_SERVER_IP:4000`
 - Kafka: internal only
