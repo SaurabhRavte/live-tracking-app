@@ -1,0 +1,22 @@
+{
+  "name": "live-tracker",
+  "version": "1.0.0",
+  "description": "Real-time live location tracking system",
+  "private": true,
+  "scripts": {
+    "infra:up": "docker compose -f docker-compose.dev.yml up -d",
+    "infra:down": "docker compose -f docker-compose.dev.yml down",
+    "infra:logs": "docker compose -f docker-compose.dev.yml logs -f",
+    "server:install": "cd server && pnpm install",
+    "client:install": "cd client && pnpm install",
+    "install:all": "pnpm server:install && pnpm client:install",
+    "server:dev": "cd server && pnpm dev",
+    "client:dev": "cd client && pnpm dev",
+    "server:build": "cd server && pnpm build",
+    "client:build": "cd client && pnpm build",
+    "build:all": "pnpm server:build && pnpm client:build",
+    "docker:up": "docker compose up --build -d",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f"
+  }
+}

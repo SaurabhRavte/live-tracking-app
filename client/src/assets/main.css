@@ -1,0 +1,79 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
+    @apply bg-canvas text-accent;
+    font-family: "DM Sans", system-ui, sans-serif;
+  }
+
+  ::-webkit-scrollbar {
+    width: 4px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-surface;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-muted rounded-full;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 cursor-pointer select-none disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+
+  .btn-primary {
+    @apply btn bg-accent text-canvas hover:bg-white active:scale-95;
+  }
+
+  .btn-ghost {
+    @apply btn bg-transparent text-dim hover:text-accent hover:bg-surface border border-border;
+  }
+
+  .btn-danger {
+    @apply btn bg-transparent text-red-400 hover:bg-red-500/10 border border-red-500/30;
+  }
+
+  .input {
+    @apply w-full px-3 py-2.5 rounded-lg bg-surface border border-border text-accent placeholder:text-dim text-sm focus:outline-none focus:border-accent/40 transition-colors;
+  }
+
+  .card {
+    @apply bg-surface border border-border rounded-xl;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .badge-live {
+    @apply badge bg-live/10 text-live;
+  }
+
+  .badge-dim {
+    @apply badge bg-muted text-dim;
+  }
+}
+
+/* Page transitions */
+.page-enter {
+  animation: slide-up 0.25s ease-out;
+}
+
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
